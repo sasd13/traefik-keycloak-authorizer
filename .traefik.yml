@@ -1,0 +1,10 @@
+displayName: Keycloak authorizer middleware
+type: middleware
+
+import: github.com/sasd13/traefik-keycloak-authorizer
+
+summary: 'Authorizes requests given a JWT token issued with Keycloak'
+
+testData:
+  Headers:
+    X-Api-Key: DEMO_KEY
