@@ -80,7 +80,7 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 	}
 
 	var data keycloakAPIResponse
-	if err := json.Unmarshal(resBody, &data); err != nil {
+	if err = json.Unmarshal(resBody, &data); err != nil {
 		log.Printf("Failed to parse response body: %v", err)
 		http.Error(rw, errForbidden, http.StatusForbidden)
 		return
