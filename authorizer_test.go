@@ -14,7 +14,8 @@ import (
 
 func TestAuthorizer(t *testing.T) {
 	cfg := authorizer.CreateConfig()
-	cfg.Headers["X-Api-Key"] = "DEMO_KEY"
+	cfg.Issuer = "https://keycloak.example.com/auth/realms/myrealm"
+	cfg.Audience = "myclient"
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
@@ -27,12 +28,12 @@ func TestAuthorizer(t *testing.T) {
 	recorder := httptest.NewRecorder()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
-	req.Header.Set("Location", "https://api.nasa.gov/planetary/apod")
+	req.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	handler.ServeHTTP(recorder, req)
 
-	assert.Equal(t, 200, recorder.Result().StatusCode)
+	assert.Equal(t, 403, recorder.Result().StatusCode)
 }
