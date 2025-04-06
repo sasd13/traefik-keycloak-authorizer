@@ -49,13 +49,35 @@ func readPermissions(token jwt.MapClaims) []string {
 		return grants
 	}
 
-	for _, permission := range permissions.([]interface{}) {
-		permissionMap := permission.(map[string]interface{})
-		rsname := permissionMap["rsname"].(string)
+	permissionsList, ok := permissions.([]interface{})
+	if !ok {
+		return grants
+	}
+
+	for _, permission := range permissionsList {
+		permissionMap, ok := permission.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		rsname, ok := permissionMap["rsname"].(string)
+		if !ok {
+			continue
+		}
 
 		if scopes, ok := permissionMap["scopes"]; ok {
-			for _, scope := range scopes.([]interface{}) {
-				grants = append(grants, fmt.Sprintf("%s:%s", rsname, scope.(string)))
+			scopesList, ok := scopes.([]interface{})
+			if !ok {
+				continue
+			}
+
+			for _, scope := range scopesList {
+				scopeStr, ok := scope.(string)
+				if !ok {
+					continue
+				}
+
+				grants = append(grants, fmt.Sprintf("%s:%s", rsname, scopeStr))
 			}
 		}
 	}

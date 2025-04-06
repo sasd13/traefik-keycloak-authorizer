@@ -2,7 +2,6 @@
 package traefik_keycloak_authorizer
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -47,8 +46,4 @@ func sendRequest(req *http.Request) ([]byte, error) {
 	}()
 
 	return io.ReadAll(res.Body)
-}
-
-func toBase64String(data string) string {
-	return base64.StdEncoding.EncodeToString([]byte(data))
 }
