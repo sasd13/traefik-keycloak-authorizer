@@ -39,8 +39,8 @@ func getClaim(token jwt.MapClaims, claim string) (string, error) {
 func readPermissions(token jwt.MapClaims) []string {
 	var grants []string
 
-	authorization := token["authorization"].(map[string]interface{})
-	if authorization == nil {
+	authorization, ok := token["authorization"].(map[string]interface{})
+	if !ok {
 		return grants
 	}
 
