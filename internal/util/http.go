@@ -1,5 +1,5 @@
-//nolint:revive
-package traefik_keycloak_authorizer
+// Package util provides util functionalities.
+package util
 
 import (
 	"errors"
@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-func getRequestToken(r *http.Request) (string, error) {
+// GetRequestToken extracts the token from the Authorization header of the request.
+func GetRequestToken(r *http.Request) (string, error) {
 	header := r.Header.Get("Authorization")
 	if header == "" {
 		return "", errors.New("Header not found")
@@ -21,15 +22,16 @@ func getRequestToken(r *http.Request) (string, error) {
 		return "", errors.New("Header is invalid")
 	}
 
-	accessToken := header[len(prefix):]
-	if accessToken == "" {
-		return "", errors.New("Access token not found")
+	token := header[len(prefix):]
+	if token == "" {
+		return "", errors.New("Token not found")
 	}
 
-	return accessToken, nil
+	return token, nil
 }
 
-func sendRequest(req *http.Request) ([]byte, error) {
+// SendRequest sends an HTTP request and returns the response body.
+func SendRequest(req *http.Request) ([]byte, error) {
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, errors.New("Request client failed")

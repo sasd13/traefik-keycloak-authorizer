@@ -1,5 +1,5 @@
-//nolint:revive
-package traefik_keycloak_authorizer
+// Package keycloak provides keycloak functionalities.
+package keycloak
 
 import (
 	"fmt"
@@ -7,14 +7,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type keycloakAPIResponse struct {
-	//nolint:tagliatelle
-	AccessToken string `json:"access_token"`
-}
-
 func parseToken(token string) (jwt.MapClaims, error) {
 	// Parse the JWT token without verifying the signature since the issuer is trusted
-	parsed, _, err := jwt.NewParser().ParseUnverified(token, &jwt.MapClaims{})
+	parsed, _, err := jwt.NewParser().ParseUnverified(token, jwt.MapClaims{})
 	if err != nil {
 		return nil, err
 	}
@@ -25,15 +20,6 @@ func parseToken(token string) (jwt.MapClaims, error) {
 	}
 
 	return claims, nil
-}
-
-func getClaim(token jwt.MapClaims, claim string) (string, error) {
-	claim, ok := token[claim].(string)
-	if !ok {
-		return "", fmt.Errorf("failed to get claim: %s", claim)
-	}
-
-	return claim, nil
 }
 
 func readPermissions(token jwt.MapClaims) []string {
@@ -83,4 +69,14 @@ func readPermissions(token jwt.MapClaims) []string {
 	}
 
 	return grants
+}
+
+// GetClaim retrieves a claim from the token.
+func GetClaim(token jwt.MapClaims, claim string) (string, error) {
+	claim, ok := token[claim].(string)
+	if !ok {
+		return "", fmt.Errorf("failed to get claim: %s", claim)
+	}
+
+	return claim, nil
 }

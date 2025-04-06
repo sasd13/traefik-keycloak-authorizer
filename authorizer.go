@@ -4,14 +4,15 @@
 package traefik_keycloak_authorizer
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
+
+	"github.com/golang-jwt/jwt/v5"
+	kc "github.com/sasd13/traefik-keycloak-authorizer/internal/keycloak"
+	util "github.com/sasd13/traefik-keycloak-authorizer/internal/util"
 )
 
 const (
@@ -20,8 +21,10 @@ const (
 
 // Config the plugin configuration.
 type Config struct {
-	Issuer   string `json:"issuer,omitempty"`
-	Audience string `json:"audience,omitempty"`
+	Issuer   string   `json:"issuer,omitempty"`
+	Audience string   `json:"audience,omitempty"`
+	Some     []string `json:"some,omitempty"`
+	Every    []string `json:"every,omitempty"`
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -33,6 +36,8 @@ func CreateConfig() *Config {
 type KeycloakAuthorizer struct {
 	issuer   string
 	audience string
+	some     []string
+	every    []string
 	next     http.Handler
 	name     string
 }
@@ -43,13 +48,15 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	return &KeycloakAuthorizer{
 		issuer:   strings.TrimRight(config.Issuer, "/"),
 		audience: config.Audience,
+		some:     config.Some,
+		every:    config.Every,
 		next:     next,
 		name:     name,
 	}, nil
 }
 
 func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	reqToken, err := getRequestToken(r)
+	reqToken, err := util.GetRequestToken(r)
 	if err != nil {
 		log.Printf("Failed to get request token: %v", err)
 		http.Error(rw, errForbidden, http.StatusForbidden)
@@ -58,42 +65,29 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 
 	log.Printf("Authorizing request against: %s", p.issuer)
 
-	// Create a new request to the token endpoint
-	url := p.issuer + "/protocol/openid-connect/token"
-	reqBody := fmt.Sprintf("audience=%s&grant_type=urn:ietf:params:oauth:grant-type:uma-ticket", p.audience)
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, url, bytes.NewReader([]byte(reqBody)))
+	// Create a new request to Keycloak token endpoint
+	req, err := kc.NewRequest(r.Context(), reqToken, p.issuer, p.audience)
 	if err != nil {
 		log.Printf("Failed to create request: %v", err)
 		http.Error(rw, errForbidden, http.StatusForbidden)
 		return
 	}
 
-	req.Header.Set("Authorization", "Bearer "+reqToken)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
 	// Perform the request
-	resBody, err := sendRequest(req)
+	resBody, err := util.SendRequest(req)
 	if err != nil {
 		log.Printf("Failed to send request: %v", err)
 		http.Error(rw, errForbidden, http.StatusForbidden)
 		return
 	}
 
-	var data keycloakAPIResponse
-	if err = json.Unmarshal(resBody, &data); err != nil {
-		log.Printf("Failed to parse response body: %v", err)
-		http.Error(rw, errForbidden, http.StatusForbidden)
-		return
-	}
-
-	decodedToken, err := parseToken(data.AccessToken)
+	// Parse the response
+	resToken, permissions, err := kc.ParseResponse(resBody)
 	if err != nil {
-		log.Printf("Failed to parse access token: %v", err)
+		log.Printf("Failed to parse response: %v", err)
 		http.Error(rw, errForbidden, http.StatusForbidden)
 		return
 	}
-
-	permissions := readPermissions(decodedToken)
 
 	// Check permissions
 	if err := p.checkPermissions(permissions); err != nil {
@@ -103,14 +97,7 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 	}
 
 	// Set request metadata
-	aud, _ := getClaim(decodedToken, "aud")
-	azp, _ := getClaim(decodedToken, "azp")
-	sub, _ := getClaim(decodedToken, "sub")
-
-	r.Header.Set("X-User-Aud", aud)
-	r.Header.Set("X-User-Azp", azp)
-	r.Header.Set("X-User-Sub", sub)
-	r.Header.Set("X-User-Prm", strings.Join(permissions, ","))
+	p.setRequestMetadata(r, resToken, permissions)
 
 	p.next.ServeHTTP(rw, r)
 }
@@ -120,5 +107,26 @@ func (p *KeycloakAuthorizer) checkPermissions(permissions []string) error {
 		return errors.New("No permission found")
 	}
 
+	some := util.Intersect(permissions, p.some)
+	if len(p.some) > 0 && len(some) == 0 {
+		return errors.New("Unmatched permissions")
+	}
+
+	every := util.Intersect(permissions, p.every)
+	if len(p.every) > len(every) {
+		return errors.New("Insufficient permissions")
+	}
+
 	return nil
+}
+
+func (p *KeycloakAuthorizer) setRequestMetadata(r *http.Request, token jwt.MapClaims, permissions []string) {
+	aud, _ := kc.GetClaim(token, "aud")
+	azp, _ := kc.GetClaim(token, "azp")
+	sub, _ := kc.GetClaim(token, "sub")
+
+	r.Header.Set("X-User-Aud", aud)
+	r.Header.Set("X-User-Azp", azp)
+	r.Header.Set("X-User-Sub", sub)
+	r.Header.Set("X-User-Prm", strings.Join(permissions, ","))
 }
