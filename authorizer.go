@@ -103,10 +103,14 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 	}
 
 	// Set request metadata
-	r.Header.Set("X-User-Aud", strings.Join(decodedToken.Audience, " "))
-	r.Header.Set("X-User-Azp", decodedToken.AuthorizedParty)
-	r.Header.Set("X-User-Sub", decodedToken.Subject)
-	r.Header.Set("X-User-Permissions", toBase64String(strings.Join(permissions, ",")))
+	aud, _ := getClaim(decodedToken, "aud")
+	azp, _ := getClaim(decodedToken, "azp")
+	sub, _ := getClaim(decodedToken, "sub")
+
+	r.Header.Set("X-User-Aud", aud)
+	r.Header.Set("X-User-Azp", azp)
+	r.Header.Set("X-User-Sub", sub)
+	r.Header.Set("X-User-Prm", strings.Join(permissions, ","))
 
 	p.next.ServeHTTP(rw, r)
 }
