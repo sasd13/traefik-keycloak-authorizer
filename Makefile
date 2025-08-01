@@ -14,6 +14,7 @@ lint:
 .PHONY: format
 format:
 	go fmt ./...
+	gofumpt -extra -w .
 
 .PHONY: test
 test:

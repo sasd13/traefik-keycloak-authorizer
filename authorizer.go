@@ -42,7 +42,7 @@ type KeycloakAuthorizer struct {
 	name     string
 }
 
-// New created a new KeycloakAuthorizer plugin.
+// New creates a new KeycloakAuthorizer plugin.
 // revive:disable-next-line unused-parameter.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	return &KeycloakAuthorizer{
@@ -96,8 +96,8 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Set request metadata
-	p.setRequestMetadata(r, resToken, permissions)
+	// Set metadata
+	p.setMetadata(r, resToken, permissions)
 
 	p.next.ServeHTTP(rw, r)
 }
@@ -120,7 +120,7 @@ func (p *KeycloakAuthorizer) checkPermissions(permissions []string) error {
 	return nil
 }
 
-func (p *KeycloakAuthorizer) setRequestMetadata(r *http.Request, token jwt.MapClaims, permissions []string) {
+func (p *KeycloakAuthorizer) setMetadata(r *http.Request, token jwt.MapClaims, permissions []string) {
 	aud, _ := kc.GetClaim(token, "aud")
 	azp, _ := kc.GetClaim(token, "azp")
 	sub, _ := kc.GetClaim(token, "sub")
