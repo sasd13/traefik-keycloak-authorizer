@@ -39,7 +39,7 @@ func NewRequest(
 }
 
 // ParseResponse parses the response from Keycloak API and extracts the access token and permissions.
-func ParseResponse(resBody []byte) (jwt.MapClaims, []string, error) {
+func ParseResponse(resBody []byte, withPermissions bool) (jwt.MapClaims, []string, error) {
 	var data keycloakAPIResponse
 	if err := json.Unmarshal(resBody, &data); err != nil {
 		return nil, nil, err
@@ -50,7 +50,10 @@ func ParseResponse(resBody []byte) (jwt.MapClaims, []string, error) {
 		return nil, nil, err
 	}
 
-	permissions := readPermissions(token)
+	permissions := []string{}
+	if withPermissions {
+		permissions = readPermissions(token)
+	}
 
 	return token, permissions, nil
 }

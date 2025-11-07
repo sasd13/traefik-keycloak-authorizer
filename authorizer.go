@@ -5,7 +5,9 @@ package traefik_keycloak_authorizer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -21,10 +23,12 @@ const (
 
 // Config the plugin configuration.
 type Config struct {
-	Issuer   string   `json:"issuer,omitempty"`
-	Audience string   `json:"audience,omitempty"`
-	Some     []string `json:"some,omitempty"`
-	Every    []string `json:"every,omitempty"`
+	Issuer          string            `json:"issuer,omitempty"`
+	Audience        string            `json:"audience,omitempty"`
+	Some            []string          `json:"some,omitempty"`
+	Every           []string          `json:"every,omitempty"`
+	WithPermissions bool              `json:"withPermissions,omitempty"`
+	HeaderMap       map[string]string `json:"headerMap,omitempty"`
 }
 
 // CreateConfig creates the default plugin configuration.
@@ -34,24 +38,28 @@ func CreateConfig() *Config {
 
 // KeycloakAuthorizer plugin struct.
 type KeycloakAuthorizer struct {
-	issuer   string
-	audience string
-	some     []string
-	every    []string
-	next     http.Handler
-	name     string
+	issuer          string
+	audience        string
+	some            []string
+	every           []string
+	withPermissions bool
+	headerMap       map[string]string
+	next            http.Handler
+	name            string
 }
 
 // New creates a new KeycloakAuthorizer plugin.
 // revive:disable-next-line unused-parameter.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	return &KeycloakAuthorizer{
-		issuer:   strings.TrimRight(config.Issuer, "/"),
-		audience: config.Audience,
-		some:     config.Some,
-		every:    config.Every,
-		next:     next,
-		name:     name,
+		issuer:          strings.TrimRight(config.Issuer, "/"),
+		audience:        config.Audience,
+		some:            config.Some,
+		every:           config.Every,
+		withPermissions: config.WithPermissions,
+		headerMap:       config.HeaderMap,
+		next:            next,
+		name:            name,
 	}, nil
 }
 
@@ -82,7 +90,7 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 	}
 
 	// Parse the response
-	resToken, permissions, err := kc.ParseResponse(resBody)
+	resToken, permissions, err := kc.ParseResponse(resBody, p.withPermissions)
 	if err != nil {
 		log.Printf("Failed to parse response: %v", err)
 		http.Error(rw, errForbidden, http.StatusForbidden)
@@ -103,6 +111,10 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 }
 
 func (p *KeycloakAuthorizer) checkPermissions(permissions []string) error {
+	if !p.withPermissions {
+		return nil
+	}
+
 	if len(permissions) == 0 {
 		return errors.New("No permission found")
 	}
@@ -120,13 +132,33 @@ func (p *KeycloakAuthorizer) checkPermissions(permissions []string) error {
 	return nil
 }
 
-func (p *KeycloakAuthorizer) setMetadata(r *http.Request, token jwt.MapClaims, permissions []string) {
-	aud, _ := kc.GetClaim(token, "aud")
-	azp, _ := kc.GetClaim(token, "azp")
-	sub, _ := kc.GetClaim(token, "sub")
+func (p *KeycloakAuthorizer) setMetadata(r *http.Request, claims jwt.MapClaims, permissions []string) {
+	p.mapClaimsToHeaders(r, claims)
 
-	r.Header.Set("X-User-Aud", aud)
-	r.Header.Set("X-User-Azp", azp)
-	r.Header.Set("X-User-Sub", sub)
-	r.Header.Set("X-User-Prm", strings.Join(permissions, ","))
+	if len(permissions) > 0 {
+		r.Header.Set("X-User-Perm", strings.Join(permissions, ","))
+	}
+}
+
+func (p *KeycloakAuthorizer) mapClaimsToHeaders(r *http.Request, claims jwt.MapClaims) {
+	for header, claim := range p.headerMap {
+		value, ok := claims[claim]
+		if !ok {
+			log.Printf("failed to get claim: %s", claim)
+			continue
+		}
+
+		r.Header.Del(header)
+		switch value := value.(type) {
+		case []any, map[string]any, nil:
+			json, err := json.Marshal(value)
+			if err == nil {
+				r.Header.Add(header, string(json))
+			}
+			// Although we check err, we don't have a branch to log an error for err != nil, because it's not possible
+			// that the value won't be marshallable to json, given it has already been unmarshalled _from_ json to get here
+		default:
+			r.Header.Add(header, fmt.Sprint(value))
+		}
+	}
 }
