@@ -125,7 +125,7 @@ func (p *KeycloakAuthorizer) checkPermissions(permissions []string) error {
 	}
 
 	every := util.Intersect(permissions, p.every)
-	if len(p.every) > len(every) {
+	if len(p.every) > 0 && len(p.every) > len(every) {
 		return errors.New("Insufficient permissions")
 	}
 
