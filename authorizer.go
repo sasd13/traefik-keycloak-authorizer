@@ -25,9 +25,10 @@ const (
 type Config struct {
 	Issuer          string            `json:"issuer,omitempty"`
 	Audience        string            `json:"audience,omitempty"`
+	WithPermissions bool              `json:"withPermissions,omitempty"`
 	Some            []string          `json:"some,omitempty"`
 	Every           []string          `json:"every,omitempty"`
-	WithPermissions bool              `json:"withPermissions,omitempty"`
+	HeaderName      string            `json:"headerName,omitempty"`
 	HeaderMap       map[string]string `json:"headerMap,omitempty"`
 }
 
@@ -40,9 +41,10 @@ func CreateConfig() *Config {
 type KeycloakAuthorizer struct {
 	issuer          string
 	audience        string
+	withPermissions bool
 	some            []string
 	every           []string
-	withPermissions bool
+	headerName      string
 	headerMap       map[string]string
 	next            http.Handler
 	name            string
@@ -54,9 +56,10 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	return &KeycloakAuthorizer{
 		issuer:          strings.TrimRight(config.Issuer, "/"),
 		audience:        config.Audience,
+		withPermissions: config.WithPermissions,
 		some:            config.Some,
 		every:           config.Every,
-		withPermissions: config.WithPermissions,
+		headerName:      config.HeaderName,
 		headerMap:       config.HeaderMap,
 		next:            next,
 		name:            name,
@@ -136,7 +139,12 @@ func (p *KeycloakAuthorizer) setMetadata(r *http.Request, claims jwt.MapClaims, 
 	p.mapClaimsToHeaders(r, claims)
 
 	if len(permissions) > 0 {
-		r.Header.Set("X-User-Perm", strings.Join(permissions, ","))
+		header := strings.TrimSpace(p.headerName)
+		if header == "" {
+			header = "X-User-Prm"
+		}
+
+		r.Header.Set(header, strings.Join(permissions, ","))
 	}
 }
 
