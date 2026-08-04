@@ -8,7 +8,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func parseToken(token string) (jwt.MapClaims, error) {
+// ParseToken parses a raw JWT string into its claims, without verifying the signature
+// (the issuer is trusted upstream of this call).
+func ParseToken(token string) (jwt.MapClaims, error) {
 	// Parse the JWT token without verifying the signature since the issuer is trusted
 	parsed, _, err := jwt.NewParser().ParseUnverified(token, jwt.MapClaims{})
 	if err != nil {

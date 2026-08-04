@@ -38,12 +38,6 @@ func NewRequest(
 	return req, nil
 }
 
-// ParseToken parses a raw JWT string into its claims, without verifying the signature
-// (the issuer is trusted upstream of this call).
-func ParseToken(token string) (jwt.MapClaims, error) {
-	return parseToken(token)
-}
-
 // ParseResponse parses the response from Keycloak's token endpoint and extracts the RPT claims.
 func ParseResponse(resBody []byte) (jwt.MapClaims, error) {
 	var data keycloakAPIResponse
@@ -51,5 +45,5 @@ func ParseResponse(resBody []byte) (jwt.MapClaims, error) {
 		return nil, err
 	}
 
-	return parseToken(data.AccessToken)
+	return ParseToken(data.AccessToken)
 }
