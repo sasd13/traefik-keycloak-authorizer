@@ -3,6 +3,7 @@ package keycloak
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -69,6 +70,53 @@ func readPermissions(token jwt.MapClaims) []string {
 	}
 
 	return grants
+}
+
+// ReadRoles extracts resource-scoped roles from the token's resource_access claim, grouped by client.
+func ReadRoles(token jwt.MapClaims) map[string][]string {
+	roles := map[string][]string{}
+
+	resourceAccess, ok := token["resource_access"].(map[string]interface{})
+	if !ok {
+		return roles
+	}
+
+	for client, access := range resourceAccess {
+		accessMap, ok := access.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		clientRoles, ok := accessMap["roles"]
+		if !ok {
+			continue
+		}
+
+		clientRolesList, ok := clientRoles.([]interface{})
+		if !ok {
+			continue
+		}
+
+		seen := map[string]bool{}
+		var names []string
+		for _, role := range clientRolesList {
+			roleStr, ok := role.(string)
+			if !ok || seen[roleStr] {
+				continue
+			}
+			seen[roleStr] = true
+			names = append(names, roleStr)
+		}
+
+		if len(names) == 0 {
+			continue
+		}
+
+		sort.Strings(names)
+		roles[client] = names
+	}
+
+	return roles
 }
 
 // GetClaim retrieves a claim from the token.
