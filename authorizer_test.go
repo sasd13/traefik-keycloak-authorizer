@@ -193,16 +193,44 @@ func TestAuthorizerPermissionsEnabledRejectsWhenKeycloakUnreachable(t *testing.T
 	assert.Equal(t, 403, recorder.Result().StatusCode)
 }
 
-func TestNewRejectsWhenNeitherRolesNorPermissionsEnabled(t *testing.T) {
+func TestNewAllowsWhenNeitherRolesNorPermissionsEnabled(t *testing.T) {
 	cfg := authorizer.CreateConfig()
-	cfg.Issuer = "https://keycloak.example.com/auth/realms/myrealm"
+	cfg.Issuer = "https://keycloak.invalid.example" // unreachable on purpose — must not be called
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
 
-	_, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+	handler, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
 
-	assert.Error(t, err)
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
+}
+
+func TestAuthorizerPassesThroughWhenNeitherRolesNorPermissionsEnabled(t *testing.T) {
+	cfg := authorizer.CreateConfig()
+	cfg.Issuer = "https://keycloak.invalid.example" // unreachable on purpose — must not be called
+
+	ctx := context.Background()
+	reached := false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { reached = true })
+
+	handler, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+validJWT)
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, 200, recorder.Result().StatusCode)
+	assert.True(t, reached)
 }
 
 func TestNewRejectsWhenPermissionsEnabledWithoutAudience(t *testing.T) {

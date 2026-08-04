@@ -52,7 +52,10 @@ type Config struct {
 
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
-	return &Config{}
+	return &Config{
+		Roles:       RolesConfig{Enabled: false},
+		Permissions: PermissionsConfig{Enabled: false},
+	}
 }
 
 // KeycloakAuthorizer plugin struct.
@@ -68,10 +71,6 @@ type KeycloakAuthorizer struct {
 // New creates a new KeycloakAuthorizer plugin.
 // revive:disable-next-line unused-parameter.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
-	if !config.Roles.Enabled && !config.Permissions.Enabled {
-		return nil, errors.New("at least one of roles.enabled or permissions.enabled must be true")
-	}
-
 	if config.Permissions.Enabled && strings.TrimSpace(config.Permissions.Audience) == "" {
 		return nil, errors.New("permissions.audience is required when permissions.enabled is true")
 	}
