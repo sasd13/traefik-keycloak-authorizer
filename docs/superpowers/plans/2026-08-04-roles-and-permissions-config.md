@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add roles extraction from the JWT (grouped by client, from `resource_access` only, never gated) and replace the current flat `withPermissions`/`some`/`every`/`headerName` config with a nested `roles`/`permissions` config. `some`/`every` gating moves under `permissions` with its existing semantics unchanged; roles have no gating equivalent.
+**Goal:** Add roles extraction from the JWT (grouped by client, from `resource_access` only) and replace the current flat `withPermissions`/`some`/`every`/`headerName` config with a nested `roles`/`permissions` config. Both `roles` and `permissions` get symmetric `some`/`every` gating: permissions matched as `resource:scope` pairs (unchanged semantics), roles matched as `client:role` pairs (new).
 
-**Architecture:** `authorizer.go` owns config/orchestration, including the restored permissions gating. `internal/keycloak/token.go` gains an exported `ReadRoles` extractor alongside the now-exported `ReadPermissions`. `internal/keycloak/api.go`'s `ParseResponse` is replaced by two focused entry points so the plugin only calls Keycloak's network endpoint when permissions are enabled. `internal/util/util.go`'s `Intersect` is kept, unchanged — it's still used by the restored `some`/`every` matching.
+**Architecture:** `authorizer.go` owns config/orchestration, including gating for both roles and permissions via a shared-shape check (two separate methods, same rule structure). `internal/keycloak/token.go` gains an exported `ReadRoles` extractor alongside the now-exported `ReadPermissions`. `internal/keycloak/api.go`'s `ParseResponse` is replaced by two focused entry points so the plugin only calls Keycloak's network endpoint when permissions are enabled. `internal/util/util.go`'s `Intersect` is kept, unchanged — it's used by both roles and permissions matching now.
 
 **Tech Stack:** Go 1.19, `github.com/golang-jwt/jwt/v5`, `github.com/stretchr/testify` for tests, `golangci-lint` + `gofumpt` for lint/format.
 
@@ -15,8 +15,8 @@
 - Header values: comma-separated at top level; roles grouped as `client:role1+role2,client2:role3`; reserved chars `,`, `:`, `+` are documented as forbidden in role/client names, not escaped.
 - Roles source: `resource_access.<client>.roles` only — `realm_access.roles` is explicitly excluded.
 - No audience filtering for roles — every client under `resource_access` is included.
-- No gating on roles: the plugin never 403s because roles are empty — only permissions can trigger gating.
-- Permissions gating, restored under `permissions`, unchanged from current behavior: 403 if `permissions.enabled` and the permissions list is empty; 403 if `permissions.some` is non-empty and doesn't intersect the extracted permissions; 403 if `permissions.every` is non-empty and isn't a subset of the extracted permissions.
+- Permissions gating, unchanged from current behavior: 403 if `permissions.enabled` and the permissions list is empty; 403 if `permissions.some` is non-empty and doesn't intersect the extracted `resource:scope` permissions; 403 if `permissions.every` is non-empty and isn't a subset of the extracted permissions.
+- Roles gating, symmetric with permissions: 403 if `roles.enabled` and no roles were extracted at all; 403 if `roles.some` is non-empty and doesn't intersect the extracted roles flattened to `client:role` pairs; 403 if `roles.every` is non-empty and isn't a subset of the flattened `client:role` pairs. Flattening is only for matching — the `roles` output header always uses the grouped `client:role1+role2` format regardless of gating.
 - Default header names: `X-User-Rol` for roles, `X-User-Prm` for permissions (used when `HeaderName` is empty), matching the existing default-header convention in `setMetadata`.
 - Roles and clients must be sorted alphabetically in the output header (Go map iteration order is randomized).
 - Run `go test -v -cover ./...` and `golangci-lint run` and `gofumpt -extra -l .` (must report no files) before each commit that touches `.go` files.
@@ -389,6 +389,60 @@ func TestAuthorizerRolesOnlySetsHeaderWithoutNetworkCall(t *testing.T) {
 	assert.Equal(t, "kartapay-bo:bo-agent,kartapay-website:customer+merchant", capturedHeader)
 }
 
+func TestAuthorizerRolesSomeRejectsWhenUnmatched(t *testing.T) {
+	cfg := authorizer.CreateConfig()
+	cfg.Issuer = "https://keycloak.invalid.example" // unreachable on purpose — must not be called
+	cfg.Roles.Enabled = true
+	cfg.Roles.Some = []string{"kartapay-website:admin"} // not present in validJWT's roles
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+validJWT)
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, 403, recorder.Result().StatusCode)
+}
+
+func TestAuthorizerRolesSomeAllowsWhenMatched(t *testing.T) {
+	cfg := authorizer.CreateConfig()
+	cfg.Issuer = "https://keycloak.invalid.example" // unreachable on purpose — must not be called
+	cfg.Roles.Enabled = true
+	cfg.Roles.Some = []string{"kartapay-website:merchant"} // present in validJWT's roles
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+validJWT)
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, 200, recorder.Result().StatusCode)
+}
+
 func TestAuthorizerPermissionsEnabledRejectsWhenKeycloakUnreachable(t *testing.T) {
 	cfg := authorizer.CreateConfig()
 	cfg.Issuer = "https://keycloak.invalid.example.test-does-not-resolve"
@@ -422,7 +476,7 @@ func TestAuthorizerPermissionsEnabledRejectsWhenKeycloakUnreachable(t *testing.T
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `go test . -run TestAuthorizer -v`
-Expected: FAIL to compile — `cfg.Roles`/`cfg.Permissions` undefined (old flat `Config` has no such fields yet).
+Expected: FAIL to compile — `cfg.Roles`/`cfg.Permissions` undefined (old flat `Config` has no such fields yet), and `cfg.Roles.Some` undefined.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -456,10 +510,12 @@ const (
 	defaultPermissionsHeaderName = "X-User-Prm"
 )
 
-// RolesConfig configures roles extraction.
+// RolesConfig configures roles extraction and gating.
 type RolesConfig struct {
-	Enabled    bool   `json:"enabled,omitempty"`
-	HeaderName string `json:"headerName,omitempty"`
+	Enabled    bool     `json:"enabled,omitempty"`
+	HeaderName string   `json:"headerName,omitempty"`
+	Some       []string `json:"some,omitempty"`
+	Every      []string `json:"every,omitempty"`
 }
 
 // PermissionsConfig configures permissions extraction and gating.
@@ -560,6 +616,12 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 	var roles map[string][]string
 	if p.roles.Enabled {
 		roles = kc.ReadRoles(claims)
+
+		if err := p.checkRoles(roles); err != nil {
+			log.Printf("Role check failed: %v", err)
+			http.Error(rw, errForbidden, http.StatusForbidden)
+			return
+		}
 	}
 
 	p.setMetadata(r, claims, roles, permissions)
@@ -583,6 +645,39 @@ func (p *KeycloakAuthorizer) checkPermissions(permissions []string) error {
 	}
 
 	return nil
+}
+
+func (p *KeycloakAuthorizer) checkRoles(roles map[string][]string) error {
+	flattened := flattenRoles(roles)
+
+	if len(flattened) == 0 {
+		return errors.New("No role found")
+	}
+
+	some := util.Intersect(flattened, p.roles.Some)
+	if len(p.roles.Some) > 0 && len(some) == 0 {
+		return errors.New("Unmatched roles")
+	}
+
+	every := util.Intersect(flattened, p.roles.Every)
+	if len(p.roles.Every) > 0 && len(p.roles.Every) > len(every) {
+		return errors.New("Insufficient roles")
+	}
+
+	return nil
+}
+
+// flattenRoles renders a client->roles map as a flat "client:role" pair list, for gating only.
+// Header output uses formatRoles (grouped), not this.
+func flattenRoles(roles map[string][]string) []string {
+	var pairs []string
+	for client, names := range roles {
+		for _, name := range names {
+			pairs = append(pairs, client+":"+name)
+		}
+	}
+
+	return pairs
 }
 
 func (p *KeycloakAuthorizer) setMetadata(
@@ -666,7 +761,7 @@ Note on `TestAuthorizerPermissionsEnabledRejectsWhenKeycloakUnreachable`: this r
 gofumpt -extra -w authorizer.go authorizer_test.go
 golangci-lint run ./...
 git add authorizer.go authorizer_test.go
-git commit -m "feat: nested roles/permissions config, restore some/every gating under permissions"
+git commit -m "feat: nested roles/permissions config with symmetric some/every gating"
 ```
 
 ---
@@ -704,6 +799,8 @@ testData:
     Audience: myclient
 ```
 
+(`some`/`every` are intentionally omitted from `testData` — they're optional gating fields, not required for the plugin to load; keeping this test config minimal matches the existing convention.)
+
 - [ ] **Step 2: Write `readme.md` usage docs**
 
 Replace `readme.md` entirely:
@@ -714,12 +811,10 @@ Replace `readme.md` entirely:
 A Traefik plugin that authenticates a request's bearer JWT against Keycloak
 and forwards extracted roles and permissions as request headers.
 
-Roles are pure extraction — the plugin never rejects a request over roles.
-Permissions can gate requests: if `permissions.enabled` is true, the request
-is rejected when no permissions are found, or when `permissions.some`/
-`permissions.every` don't match. The request is also rejected when the
-bearer token is missing/malformed, or when the Keycloak permissions request
-fails.
+Both roles and permissions can gate requests, symmetrically: if `enabled` is
+true, the request is rejected when nothing is found at all, or when `some`/
+`every` don't match. The request is also rejected when the bearer token is
+missing/malformed, or when the Keycloak permissions request fails.
 
 ## Configuration
 
@@ -735,6 +830,10 @@ spec:
       roles:
         enabled: true
         headerName: X-User-Rol   # default: X-User-Rol
+        some:
+          - my-client:admin
+        every:
+          - my-client:verified
       permissions:
         enabled: true
         headerName: X-User-Prm   # default: X-User-Prm
@@ -751,11 +850,15 @@ spec:
 - `roles.enabled` — when true, extracts roles from the request token's
   `resource_access` claim directly (no network call to Keycloak). Roles from
   `realm_access` are not included. All clients present in `resource_access`
-  are included — there's no audience filter for roles. Never gates the
-  request.
+  are included — there's no audience filter for roles. Rejects the request
+  (403) if no roles are found at all.
 - `roles.headerName` — header the roles are written to. Format:
   `client:role1+role2,client2:role3` — clients and roles sorted
   alphabetically. Role and client names must not contain `,`, `:`, or `+`.
+- `roles.some` — if non-empty, at least one of these `client:role` pairs
+  must be present, or the request is rejected (403).
+- `roles.every` — if non-empty, all of these `client:role` pairs must be
+  present, or the request is rejected (403).
 - `permissions.enabled` — when true, exchanges the request token with
   Keycloak's token endpoint (`urn:ietf:params:oauth:grant-type:uma-ticket`)
   for a permissions-bearing token, scoped to `permissions.audience`. Rejects
@@ -764,10 +867,10 @@ spec:
   `resource:scope,resource2:scope2`.
 - `permissions.audience` — the Keycloak client id (resource server) to
   request permissions for. Required when `permissions.enabled` is true.
-- `permissions.some` — if non-empty, at least one of these permissions must
-  be present, or the request is rejected (403).
-- `permissions.every` — if non-empty, all of these permissions must be
-  present, or the request is rejected (403).
+- `permissions.some` — if non-empty, at least one of these `resource:scope`
+  pairs must be present, or the request is rejected (403).
+- `permissions.every` — if non-empty, all of these `resource:scope` pairs
+  must be present, or the request is rejected (403).
 - `headerMap` — maps arbitrary token claims to request headers
   (`<header-name>: <claim-name>`). Applied against the original request
   token, or against the Keycloak-issued token when `permissions.enabled` is
@@ -788,7 +891,7 @@ git commit -m "docs: update traefik.yml testData and readme for nested roles/per
 
 ## Self-Review Notes
 
-- **Spec coverage:** config schema with `some`/`every` restored under `permissions` (Task 3), roles-only-skips-network (Task 3 Step 3 + test), resource_access-only + realm_access excluded (Task 1), no audience filter for roles (Task 1 iterates all clients), permissions gating restored exactly as original `checkPermissions` (empty-check + some + every, Task 3), roles never gated (Task 3 — no gating call in the roles branch), grouped `client:role+role` format with alphabetical sort (Task 1 + `formatRoles` in Task 3), reserved-char documentation (Task 4 readme). All spec sections have a task.
-- **Type consistency:** `ReadRoles`/`ReadPermissions` (Task 1/2, exported) match the call sites used in Task 3's `authorizer.go`. `kc.ParseToken`/`kc.ParseResponse(resBody []byte)` signatures in Task 2 match Task 3's call sites exactly (no `withPermissions bool` argument, single return value plus error). `util.Intersect(a, b []string) []string` signature (existing, unchanged) matches its use in `checkPermissions`.
+- **Spec coverage:** config schema with `some`/`every` under both `roles` and `permissions` (Task 3), roles-only-skips-network (Task 3 Step 3 + test), resource_access-only + realm_access excluded (Task 1), no audience filter for roles (Task 1 iterates all clients), permissions gating unchanged (`checkPermissions`: empty-check + some + every, Task 3), roles gating symmetric (`checkRoles` + `flattenRoles`: empty-check + some + every against `client:role` pairs, Task 3, tested by `TestAuthorizerRolesSomeRejectsWhenUnmatched`/`TestAuthorizerRolesSomeAllowsWhenMatched`), grouped `client:role+role` header format unaffected by flattening used only for gating (Task 1 `formatRoles` vs Task 3 `flattenRoles` — two distinct functions, documented), reserved-char documentation (Task 4 readme). All spec sections have a task.
+- **Type consistency:** `ReadRoles`/`ReadPermissions` (Task 1/2, exported) match the call sites used in Task 3's `authorizer.go`. `kc.ParseToken`/`kc.ParseResponse(resBody []byte)` signatures in Task 2 match Task 3's call sites exactly (no `withPermissions bool` argument, single return value plus error). `util.Intersect(a, b []string) []string` signature (existing, unchanged) matches its use in both `checkPermissions` and `checkRoles`. `flattenRoles(roles map[string][]string) []string` is only used internally by `checkRoles`, not exported, not confused with `formatRoles` (header rendering, grouped) which is a separate function with a separate return type (`string` vs `[]string`).
 - **No placeholders:** every step has literal code, no "TBD"/"add validation"/"similar to Task N" hand-waving.
-- **Change from prior revision:** `Intersect` is no longer deleted (previously Task 3); the former "Task 3: Delete unused util.Intersect" is removed entirely since `some`/`every` gating — its only caller — is restored, not dropped.
+- **Change from prior revision:** roles gained `some`/`every` gating, symmetric with permissions, including the "reject if enabled but empty" check. `Intersect` remains kept (used by both gating paths now, not just permissions).

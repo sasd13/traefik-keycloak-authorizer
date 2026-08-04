@@ -5,11 +5,11 @@
 The plugin currently supports `withPermissions` (with `some`/`every` matching
 gates) and a flat `headerName`/`headerMap` config. We're extending it to also
 extract roles from the JWT, and simplifying the config schema to a nested
-`roles`/`permissions` shape. Roles extraction is pure (no gating — the plugin
-never rejects a request over roles). Permissions keep their existing gating
-behavior: `some`/`every` matching, now nested under `permissions`, plus the
-original "reject if permissions.enabled but the token has zero permissions"
-check.
+`roles`/`permissions` shape. Both roles and permissions get `some`/`every`
+gating, symmetric with each other: reject if enabled but empty, reject if
+`some` doesn't intersect, reject if `every` isn't a full subset. Roles are
+matched as `client:role` pairs (matching the grouped header format's
+building blocks), permissions as `resource:scope` pairs (unchanged).
 
 Target Kubernetes Middleware config:
 
@@ -26,6 +26,9 @@ spec:
       roles:
         enabled: true
         headerName: X-KP-User-Rol
+        some:
+          - client1:role1
+          - client2:role2
       permissions:
         enabled: true
         headerName: X-KP-User-Prm
@@ -38,8 +41,10 @@ spec:
 
 ```go
 type RolesConfig struct {
-    Enabled    bool   `json:"enabled,omitempty"`
-    HeaderName string `json:"headerName,omitempty"` // default: X-User-Rol
+    Enabled    bool     `json:"enabled,omitempty"`
+    HeaderName string   `json:"headerName,omitempty"` // default: X-User-Rol
+    Some       []string `json:"some,omitempty"`       // "client:role" pairs
+    Every      []string `json:"every,omitempty"`      // "client:role" pairs
 }
 
 type PermissionsConfig struct {
@@ -59,8 +64,8 @@ type Config struct {
 ```
 
 Removed: top-level `Audience`, `WithPermissions`, `HeaderName` (singular).
-`Some`/`Every` move under `Permissions` (same semantics as before), and
-`Roles` has no equivalent — roles are never gated.
+`Some`/`Every` move under `Permissions` (same semantics as before) and are
+newly added under `Roles`, matched as `client:role` pairs.
 
 ## Request flow
 
@@ -80,17 +85,28 @@ Removed: top-level `Audience`, `WithPermissions`, `HeaderName` (singular).
    are enabled (RPT mirrors original claims plus adds
    `authorization.permissions`, preserving today's behavior), otherwise
    against `reqToken` directly.
-6. Gating, unchanged from today, applies only to permissions (roles are
-   never gated):
+6. Gating applies symmetrically to both roles and permissions, using the
+   same rule shape for each (permissions' behavior is unchanged from
+   today; roles gains an equivalent):
    - If `Permissions.Enabled` and the extracted permissions list is empty,
      403 ("No permission found").
    - If `Permissions.Some` is non-empty and none of the extracted
-     permissions intersect it, 403 ("Unmatched permissions").
+     `resource:scope` permissions intersect it, 403 ("Unmatched
+     permissions").
    - If `Permissions.Every` is non-empty and not all of its entries are
      present in the extracted permissions, 403 ("Insufficient
      permissions").
-   - All other cases (including any roles outcome) proceed to
-     `p.next.ServeHTTP`.
+   - If `Roles.Enabled` and the extracted roles are empty (no
+     `resource_access` clients with roles at all), 403 ("No role found").
+   - If `Roles.Some` is non-empty and none of the extracted roles —
+     flattened to `client:role` pairs — intersect it, 403 ("Unmatched
+     roles").
+   - If `Roles.Every` is non-empty and not all of its entries are present
+     in the flattened `client:role` pairs, 403 ("Insufficient roles").
+   - Roles gating runs against the flattened `client:role` pairs only for
+     matching purposes — the header output stays in the grouped
+     `client:role1+role2` format regardless.
+   - All other cases proceed to `p.next.ServeHTTP`.
    The request is otherwise only rejected (403) on token-parse errors or
    Keycloak-request errors.
 
@@ -140,7 +156,5 @@ X-KP-User-Rol: account:manage-account+manage-account-links+view-profile,kartapay
 ## Out of scope
 
 - Escaping/quoting of delimiter characters within role or client names.
-- Any gating on roles (some/every-style matching for roles) — roles remain
-  pure extraction, unlike permissions.
 - Roles filtered by a single audience — deliberately all clients are
   included since the config no longer ties roles to `permissions.audience`.
