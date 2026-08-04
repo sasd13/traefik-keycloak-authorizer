@@ -91,7 +91,11 @@ spec:
         X-User-Email: email
 ```
 
-- `issuer` — the Keycloak realm issuer URL. Required.
+- `issuer` — the Keycloak realm issuer URL. Required (plugin construction
+  fails otherwise) when `permissions.enabled` is true, since it's used to
+  build the Keycloak token-exchange request. Not used, and not required,
+  when only `roles.enabled` is true — roles-only configs never call
+  Keycloak.
 - If neither `roles.enabled` nor `permissions.enabled` is true, the plugin
   still requires and parses a bearer JWT but performs no gating and forwards
   every request that carries a parseable token — only `headerMap` still

@@ -71,8 +71,14 @@ type KeycloakAuthorizer struct {
 // New creates a new KeycloakAuthorizer plugin.
 // revive:disable-next-line unused-parameter.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
-	if config.Permissions.Enabled && strings.TrimSpace(config.Permissions.Audience) == "" {
-		return nil, errors.New("permissions.audience is required when permissions.enabled is true")
+	if config.Permissions.Enabled {
+		if strings.TrimSpace(config.Issuer) == "" {
+			return nil, errors.New("issuer is required when permissions.enabled is true")
+		}
+
+		if strings.TrimSpace(config.Permissions.Audience) == "" {
+			return nil, errors.New("permissions.audience is required when permissions.enabled is true")
+		}
 	}
 
 	return &KeycloakAuthorizer{

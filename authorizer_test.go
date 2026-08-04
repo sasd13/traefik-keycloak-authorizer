@@ -165,8 +165,16 @@ func TestAuthorizerRolesSomeAllowsWhenMatched(t *testing.T) {
 }
 
 func TestAuthorizerPermissionsEnabledRejectsWhenKeycloakUnreachable(t *testing.T) {
+	// A local server returning a non-200 status stands in for an unreachable
+	// Keycloak, deterministically and without depending on DNS resolution
+	// behavior (which can hang or vary across sandboxed CI environments).
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
 	cfg := authorizer.CreateConfig()
-	cfg.Issuer = "https://keycloak.invalid.example.test-does-not-resolve"
+	cfg.Issuer = server.URL
 	cfg.Permissions.Enabled = true
 	cfg.Permissions.Audience = "myclient"
 
@@ -188,7 +196,7 @@ func TestAuthorizerPermissionsEnabledRejectsWhenKeycloakUnreachable(t *testing.T
 
 	handler.ServeHTTP(recorder, req)
 
-	// Keycloak request fails (DNS won't resolve) -> 403, proving permissions.enabled
+	// Keycloak request fails (non-200 status) -> 403, proving permissions.enabled
 	// still triggers the network call and gating path, unlike roles.
 	assert.Equal(t, 403, recorder.Result().StatusCode)
 }
@@ -245,6 +253,34 @@ func TestNewRejectsWhenPermissionsEnabledWithoutAudience(t *testing.T) {
 	_, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
 
 	assert.Error(t, err)
+}
+
+func TestNewRejectsWhenPermissionsEnabledWithoutIssuer(t *testing.T) {
+	cfg := authorizer.CreateConfig()
+	cfg.Issuer = "   " // blank after trimming
+	cfg.Permissions.Enabled = true
+	cfg.Permissions.Audience = "myclient"
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	_, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+
+	assert.Error(t, err)
+}
+
+func TestNewAllowsRolesOnlyWithoutIssuer(t *testing.T) {
+	cfg := authorizer.CreateConfig()
+	// Issuer intentionally left blank: roles-only configs never call Keycloak.
+	cfg.Roles.Enabled = true
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, handler)
 }
 
 // TestAuthorizerPermissionsSuccessUsesRequestTokenForRoles exercises the full
