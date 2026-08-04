@@ -92,9 +92,10 @@ spec:
 ```
 
 - `issuer` — the Keycloak realm issuer URL. Required.
-- At least one of `roles.enabled` or `permissions.enabled` must be true, or
-  plugin construction fails — a config that gates on neither would authorize
-  every request.
+- If neither `roles.enabled` nor `permissions.enabled` is true, the plugin
+  still requires and parses a bearer JWT but performs no gating and forwards
+  every request that carries a parseable token — only `headerMap` still
+  applies. Set at least one of them to actually enforce authorization.
 - `roles.enabled` — when true, extracts roles from the request token's
   `resource_access` claim directly (no network call to Keycloak). Roles from
   `realm_access` are not included. All clients present in `resource_access`

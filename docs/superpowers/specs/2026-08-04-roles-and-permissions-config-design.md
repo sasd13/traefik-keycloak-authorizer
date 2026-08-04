@@ -17,12 +17,12 @@ Target Kubernetes Middleware config:
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: prod-kpay-common-jwt-authorization
-  namespace: kpay
+  name: prod-my-app-jwt-authorization
+  namespace: my-app
 spec:
   plugin:
     jwtAuthorization:
-      issuer: https://auth.kartalys.io/realms/kartapay-prod
+      issuer: https://auth.example.com/realms/myrealm-prod
       roles:
         enabled: true
         headerName: X-KP-User-Rol
@@ -32,7 +32,7 @@ spec:
       permissions:
         enabled: true
         headerName: X-KP-User-Prm
-        audience: kartapay-website
+        audience: client-x
         some: ["orders:read"]
         every: ["billing:write"]
 ```
@@ -142,15 +142,15 @@ format (e.g. RFC 8941 Structured Field Values).
 Given a token with:
 ```json
 "resource_access": {
-  "kartapay-website": { "roles": ["merchant", "customer"] },
-  "kartapay-bo": { "roles": ["bo-agent"] },
+  "client-x": { "roles": ["merchant", "customer"] },
+  "client-y": { "roles": ["agent"] },
   "account": { "roles": ["manage-account", "manage-account-links", "view-profile"] }
 }
 ```
 
 Result:
 ```
-X-KP-User-Rol: account:manage-account+manage-account-links+view-profile,kartapay-bo:bo-agent,kartapay-website:customer+merchant
+X-KP-User-Rol: account:manage-account+manage-account-links+view-profile,client-y:agent,client-x:customer+merchant
 ```
 
 ## Out of scope

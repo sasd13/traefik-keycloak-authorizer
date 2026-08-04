@@ -53,11 +53,11 @@ import (
 func TestReadRolesFlattensAndDedupesPerClient(t *testing.T) {
 	token := jwt.MapClaims{
 		"resource_access": map[string]interface{}{
-			"kartapay-website": map[string]interface{}{
+			"client-x": map[string]interface{}{
 				"roles": []interface{}{"merchant", "customer", "merchant"},
 			},
-			"kartapay-bo": map[string]interface{}{
-				"roles": []interface{}{"bo-agent"},
+			"client-y": map[string]interface{}{
+				"roles": []interface{}{"agent"},
 			},
 			"account": map[string]interface{}{
 				"roles": []interface{}{"manage-account", "manage-account-links", "view-profile"},
@@ -71,9 +71,9 @@ func TestReadRolesFlattensAndDedupesPerClient(t *testing.T) {
 	roles := ReadRoles(token)
 
 	assert.Equal(t, map[string][]string{
-		"kartapay-website": {"customer", "merchant"},
-		"kartapay-bo":       {"bo-agent"},
-		"account":           {"manage-account", "manage-account-links", "view-profile"},
+		"client-x": {"customer", "merchant"},
+		"client-y": {"agent"},
+		"account":  {"manage-account", "manage-account-links", "view-profile"},
 	}, roles)
 }
 
@@ -386,14 +386,14 @@ func TestAuthorizerRolesOnlySetsHeaderWithoutNetworkCall(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	assert.Equal(t, 200, recorder.Result().StatusCode)
-	assert.Equal(t, "kartapay-bo:bo-agent,kartapay-website:customer+merchant", capturedHeader)
+	assert.Equal(t, "client-y:agent,client-x:customer+merchant", capturedHeader)
 }
 
 func TestAuthorizerRolesSomeRejectsWhenUnmatched(t *testing.T) {
 	cfg := authorizer.CreateConfig()
 	cfg.Issuer = "https://keycloak.invalid.example" // unreachable on purpose — must not be called
 	cfg.Roles.Enabled = true
-	cfg.Roles.Some = []string{"kartapay-website:admin"} // not present in validJWT's roles
+	cfg.Roles.Some = []string{"client-x:admin"} // not present in validJWT's roles
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
@@ -420,7 +420,7 @@ func TestAuthorizerRolesSomeAllowsWhenMatched(t *testing.T) {
 	cfg := authorizer.CreateConfig()
 	cfg.Issuer = "https://keycloak.invalid.example" // unreachable on purpose — must not be called
 	cfg.Roles.Enabled = true
-	cfg.Roles.Some = []string{"kartapay-website:merchant"} // present in validJWT's roles
+	cfg.Roles.Some = []string{"client-x:merchant"} // present in validJWT's roles
 
 	ctx := context.Background()
 	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
