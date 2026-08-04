@@ -24,7 +24,44 @@ true, the request is rejected when nothing is found at all, or when `some`/
 `every` don't match. The request is also rejected when the bearer token is
 missing/malformed, or when the Keycloak permissions request fails.
 
+## Installation
+
+For a plugin to be active, it must be declared in Traefik's static
+configuration, referencing a released git tag of this repository:
+
+```yaml
+# Static configuration
+experimental:
+  plugins:
+    jwtAuthorization:
+      moduleName: github.com/sasd13/traefik-keycloak-authorizer
+      version: v0.3.2
+```
+
+Once loaded, the plugin is configured per-middleware in the dynamic
+configuration, under the alias declared above (`jwtAuthorization` here):
+
+```yaml
+# Dynamic configuration
+http:
+  middlewares:
+    my-authorizer:
+      plugin:
+        jwtAuthorization:
+          issuer: https://auth.example.com/realms/myrealm
+          roles:
+            enabled: true
+          permissions:
+            enabled: true
+            audience: my-client
+```
+
 ## Configuration
+
+The `plugin.jwtAuthorization` block above accepts the following fields.
+Here it is shown in full, as a Kubernetes `Middleware` CRD (the same fields
+apply under `http.middlewares.<name>.plugin.jwtAuthorization` in any other
+dynamic configuration provider):
 
 ```yaml
 apiVersion: traefik.io/v1alpha1
