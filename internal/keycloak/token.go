@@ -23,7 +23,8 @@ func parseToken(token string) (jwt.MapClaims, error) {
 	return claims, nil
 }
 
-func readPermissions(token jwt.MapClaims) []string {
+// ReadPermissions extracts granted permissions from the token's authorization claim.
+func ReadPermissions(token jwt.MapClaims) []string {
 	var grants []string
 
 	authorization, ok := token["authorization"].(map[string]interface{})

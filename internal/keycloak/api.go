@@ -38,22 +38,18 @@ func NewRequest(
 	return req, nil
 }
 
-// ParseResponse parses the response from Keycloak API and extracts the access token and permissions.
-func ParseResponse(resBody []byte, withPermissions bool) (jwt.MapClaims, []string, error) {
+// ParseToken parses a raw JWT string into its claims, without verifying the signature
+// (the issuer is trusted upstream of this call).
+func ParseToken(token string) (jwt.MapClaims, error) {
+	return parseToken(token)
+}
+
+// ParseResponse parses the response from Keycloak's token endpoint and extracts the RPT claims.
+func ParseResponse(resBody []byte) (jwt.MapClaims, error) {
 	var data keycloakAPIResponse
 	if err := json.Unmarshal(resBody, &data); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	token, err := parseToken(data.AccessToken)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	permissions := []string{}
-	if withPermissions {
-		permissions = readPermissions(token)
-	}
-
-	return token, permissions, nil
+	return parseToken(data.AccessToken)
 }
