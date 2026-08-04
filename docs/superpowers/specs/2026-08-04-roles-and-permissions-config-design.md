@@ -4,10 +4,12 @@
 
 The plugin currently supports `withPermissions` (with `some`/`every` matching
 gates) and a flat `headerName`/`headerMap` config. We're extending it to also
-extract roles from the JWT, and simultaneously simplifying the config schema
-and dropping the pass/fail authorization gating — the plugin becomes purely
-an authenticator + claims-to-headers extractor, with authorization decisions
-delegated to downstream services that read the headers.
+extract roles from the JWT, and simplifying the config schema to a nested
+`roles`/`permissions` shape. Roles extraction is pure (no gating — the plugin
+never rejects a request over roles). Permissions keep their existing gating
+behavior: `some`/`every` matching, now nested under `permissions`, plus the
+original "reject if permissions.enabled but the token has zero permissions"
+check.
 
 Target Kubernetes Middleware config:
 
@@ -28,6 +30,8 @@ spec:
         enabled: true
         headerName: X-KP-User-Prm
         audience: kartapay-website
+        some: ["orders:read"]
+        every: ["billing:write"]
 ```
 
 ## Config schema
@@ -39,9 +43,11 @@ type RolesConfig struct {
 }
 
 type PermissionsConfig struct {
-    Enabled    bool   `json:"enabled,omitempty"`
-    HeaderName string `json:"headerName,omitempty"` // default: X-User-Prm
-    Audience   string `json:"audience,omitempty"`
+    Enabled    bool     `json:"enabled,omitempty"`
+    HeaderName string   `json:"headerName,omitempty"` // default: X-User-Prm
+    Audience   string   `json:"audience,omitempty"`
+    Some       []string `json:"some,omitempty"`
+    Every      []string `json:"every,omitempty"`
 }
 
 type Config struct {
@@ -52,8 +58,9 @@ type Config struct {
 }
 ```
 
-Removed: top-level `Audience`, `WithPermissions`, `HeaderName` (singular),
-`Some`, `Every`.
+Removed: top-level `Audience`, `WithPermissions`, `HeaderName` (singular).
+`Some`/`Every` move under `Permissions` (same semantics as before), and
+`Roles` has no equivalent — roles are never gated.
 
 ## Request flow
 
@@ -73,9 +80,19 @@ Removed: top-level `Audience`, `WithPermissions`, `HeaderName` (singular),
    are enabled (RPT mirrors original claims plus adds
    `authorization.permissions`, preserving today's behavior), otherwise
    against `reqToken` directly.
-6. No gating: the request is only rejected (403) on token-parse errors or
-   Keycloak-request errors — never because roles/permissions are empty or
-   don't match anything. `some`/`every` matching is removed entirely.
+6. Gating, unchanged from today, applies only to permissions (roles are
+   never gated):
+   - If `Permissions.Enabled` and the extracted permissions list is empty,
+     403 ("No permission found").
+   - If `Permissions.Some` is non-empty and none of the extracted
+     permissions intersect it, 403 ("Unmatched permissions").
+   - If `Permissions.Every` is non-empty and not all of its entries are
+     present in the extracted permissions, 403 ("Insufficient
+     permissions").
+   - All other cases (including any roles outcome) proceed to
+     `p.next.ServeHTTP`.
+   The request is otherwise only rejected (403) on token-parse errors or
+   Keycloak-request errors.
 
 ## Header value formats
 
@@ -123,7 +140,7 @@ X-KP-User-Rol: account:manage-account+manage-account-links+view-profile,kartapay
 ## Out of scope
 
 - Escaping/quoting of delimiter characters within role or client names.
-- Authorization gating of any kind (some/every-style matching) — removed,
-  not replaced.
+- Any gating on roles (some/every-style matching for roles) — roles remain
+  pure extraction, unlike permissions.
 - Roles filtered by a single audience — deliberately all clients are
   included since the config no longer ties roles to `permissions.audience`.
