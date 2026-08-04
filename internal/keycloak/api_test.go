@@ -2,6 +2,8 @@
 package keycloak
 
 import (
+	"context"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -30,6 +32,27 @@ func TestParseTokenExported(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, "1234567890", claims["sub"])
+}
+
+func TestNewRequestBuildsExpectedRequest(t *testing.T) {
+	req, err := NewRequest(context.Background(), "the-token", "https://keycloak.example.com/realms/myrealm", "my-client")
+
+	assert.NoError(t, err)
+	assert.Equal(t, "POST", req.Method)
+	assert.Equal(t, "https://keycloak.example.com/realms/myrealm/protocol/openid-connect/token", req.URL.String())
+	assert.Equal(t, "Bearer the-token", req.Header.Get("Authorization"))
+	assert.Equal(t, "application/x-www-form-urlencoded", req.Header.Get("Content-Type"))
+
+	body, err := io.ReadAll(req.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, "audience=my-client&grant_type=urn:ietf:params:oauth:grant-type:uma-ticket", string(body))
+}
+
+func TestNewRequestErrorsOnInvalidIssuerURL(t *testing.T) {
+	// A control character in the URL makes http.NewRequestWithContext fail.
+	_, err := NewRequest(context.Background(), "the-token", "https://keycloak.example.com/\n", "my-client")
+
+	assert.Error(t, err)
 }
 
 func TestReadPermissionsExported(t *testing.T) {
