@@ -101,8 +101,8 @@ spec:
   are included — there's no audience filter for roles. Rejects the request
   (403) if no roles are found at all.
 - `roles.headerName` — header the roles are written to. Format:
-  `client:role1+role2,client2:role3` — clients and roles sorted
-  alphabetically. Role and client names must not contain `,`, `:`, or `+`.
+  `client:role,client:role2,client2:role3` — clients and roles sorted
+  alphabetically. Role and client names must not contain `,` or `:`.
 - `roles.some` — if non-empty, at least one of these `client:role` pairs
   must be present, or the request is rejected (403).
 - `roles.every` — if non-empty, all of these `client:role` pairs must be

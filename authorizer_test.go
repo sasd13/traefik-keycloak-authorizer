@@ -107,7 +107,7 @@ func TestAuthorizerRolesOnlySetsHeaderWithoutNetworkCall(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 
 	assert.Equal(t, 200, recorder.Result().StatusCode)
-	assert.Equal(t, "client-a:editor+viewer,client-b:admin", capturedHeader)
+	assert.Equal(t, "client-a:editor,client-a:viewer,client-b:admin", capturedHeader)
 }
 
 func TestAuthorizerRolesSomeRejectsWhenUnmatched(t *testing.T) {
@@ -313,7 +313,7 @@ func TestAuthorizerPermissionsSuccessUsesRequestTokenForRoles(t *testing.T) {
 	assert.Equal(t, 200, recorder.Result().StatusCode)
 	assert.Equal(t, "orders:read", capturedPermissions)
 	// Must reflect validJWT (the request token), never the RPT's "other-client:admin".
-	assert.Equal(t, "client-a:editor+viewer,client-b:admin", capturedRoles)
+	assert.Equal(t, "client-a:editor,client-a:viewer,client-b:admin", capturedRoles)
 }
 
 func TestAuthorizerRejectsWhenRequestTokenMalformed(t *testing.T) {

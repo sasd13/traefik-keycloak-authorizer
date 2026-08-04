@@ -247,7 +247,7 @@ func (p *KeycloakAuthorizer) setMetadata(
 	}
 }
 
-// formatRoles renders a client->roles map as "client:role1+role2,client2:role3",
+// formatRoles renders a client->roles map as "client:role1,client:role2,client2:role3",
 // with clients and roles sorted alphabetically for deterministic output.
 func formatRoles(roles map[string][]string) string {
 	clients := make([]string, 0, len(roles))
@@ -256,12 +256,14 @@ func formatRoles(roles map[string][]string) string {
 	}
 	sort.Strings(clients)
 
-	groups := make([]string, 0, len(clients))
+	pairs := make([]string, 0, len(clients))
 	for _, client := range clients {
-		groups = append(groups, client+":"+strings.Join(roles[client], "+"))
+		for _, role := range roles[client] {
+			pairs = append(pairs, client+":"+role)
+		}
 	}
 
-	return strings.Join(groups, ",")
+	return strings.Join(pairs, ",")
 }
 
 func (p *KeycloakAuthorizer) mapClaimsToHeaders(r *http.Request, claims jwt.MapClaims) {
