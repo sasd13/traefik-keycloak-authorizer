@@ -7,4 +7,10 @@ summary: 'Authorizes requests given a JWT token issued with Keycloak'
 
 testData:
   Issuer: https://keycloak.example.com/auth/realms/myrealm
-  Audience: myclient
+  Roles:
+    Enabled: true
+    HeaderName: X-User-Rol
+  Permissions:
+    Enabled: true
+    HeaderName: X-User-Prm
+    Audience: myclient
