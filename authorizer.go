@@ -68,6 +68,14 @@ type KeycloakAuthorizer struct {
 // New creates a new KeycloakAuthorizer plugin.
 // revive:disable-next-line unused-parameter.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
+	if !config.Roles.Enabled && !config.Permissions.Enabled {
+		return nil, errors.New("at least one of roles.enabled or permissions.enabled must be true")
+	}
+
+	if config.Permissions.Enabled && strings.TrimSpace(config.Permissions.Audience) == "" {
+		return nil, errors.New("permissions.audience is required when permissions.enabled is true")
+	}
+
 	return &KeycloakAuthorizer{
 		issuer:      strings.TrimRight(config.Issuer, "/"),
 		roles:       config.Roles,
@@ -86,12 +94,14 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	claims, err := kc.ParseToken(reqToken)
+	reqClaims, err := kc.ParseToken(reqToken)
 	if err != nil {
 		log.Printf("Failed to parse request token: %v", err)
 		http.Error(rw, errForbidden, http.StatusForbidden)
 		return
 	}
+
+	claims := reqClaims
 
 	var permissions []string
 	if p.permissions.Enabled {
@@ -130,7 +140,7 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 
 	var roles map[string][]string
 	if p.roles.Enabled {
-		roles = kc.ReadRoles(claims)
+		roles = kc.ReadRoles(reqClaims)
 
 		if err := p.checkRoles(roles); err != nil {
 			log.Printf("Role check failed: %v", err)
@@ -154,8 +164,7 @@ func (p *KeycloakAuthorizer) checkPermissions(permissions []string) error {
 		return errors.New("Unmatched permissions")
 	}
 
-	every := util.Intersect(permissions, p.permissions.Every)
-	if len(p.permissions.Every) > 0 && len(p.permissions.Every) > len(every) {
+	if len(p.permissions.Every) > 0 && !containsAll(permissions, p.permissions.Every) {
 		return errors.New("Insufficient permissions")
 	}
 
@@ -174,12 +183,29 @@ func (p *KeycloakAuthorizer) checkRoles(roles map[string][]string) error {
 		return errors.New("Unmatched roles")
 	}
 
-	every := util.Intersect(flattened, p.roles.Every)
-	if len(p.roles.Every) > 0 && len(p.roles.Every) > len(every) {
+	if len(p.roles.Every) > 0 && !containsAll(flattened, p.roles.Every) {
 		return errors.New("Insufficient roles")
 	}
 
 	return nil
+}
+
+// containsAll reports whether every entry of want is present in have. Duplicate
+// entries in want are not double-counted, so a want list with repeated entries
+// that are all satisfied does not incorrectly fail.
+func containsAll(have, want []string) bool {
+	set := make(map[string]bool, len(have))
+	for _, v := range have {
+		set[v] = true
+	}
+
+	for _, v := range want {
+		if !set[v] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // flattenRoles renders a client->roles map as a flat "client:role" pair list, for gating only.
