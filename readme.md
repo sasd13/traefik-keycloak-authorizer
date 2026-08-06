@@ -21,8 +21,11 @@ token will be authorized based on its claims alone.
 
 Both roles and permissions can gate requests, symmetrically: if `enabled` is
 true, the request is rejected when nothing is found at all, or when `some`/
-`every` don't match. The request is also rejected when the bearer token is
-missing/malformed, or when the Keycloak permissions request fails.
+`every` don't match — unless `enforce` is explicitly set to `false`, in which
+case that block only extracts and forwards the header, without rejecting the
+request (see `roles.enforce`/`permissions.enforce` below). The request is
+also rejected when the bearer token is missing/malformed, or when the
+Keycloak permissions request fails, regardless of `enforce`.
 
 ## Installation
 
@@ -74,6 +77,7 @@ spec:
       issuer: https://auth.example.com/realms/myrealm
       roles:
         enabled: true
+        enforce: true             # default: true
         headerName: X-User-Rol   # default: X-User-Rol
         some:
           - my-client:admin
@@ -81,6 +85,7 @@ spec:
           - my-client:verified
       permissions:
         enabled: true
+        enforce: true             # default: true
         headerName: X-User-Prm   # default: X-User-Prm
         audience: my-client
         some:
@@ -104,26 +109,49 @@ spec:
   `resource_access` claim directly (no network call to Keycloak). Roles from
   `realm_access` are not included. All clients present in `resource_access`
   are included — there's no audience filter for roles. Rejects the request
-  (403) if no roles are found at all.
+  (403) if no roles are found at all, unless `roles.enforce` is `false`
+  (see below).
+- `roles.enforce` — default `true`. When `false`, roles are still extracted
+  and forwarded via `roles.headerName`, but never gate the request: an empty
+  role list and unmatched `some`/`every` are both allowed through. Use this
+  when a downstream service already performs its own per-route authorization
+  from the forwarded header/claims (e.g. app-level guards keyed on role or
+  permission, fed by this plugin's output) and this plugin's job is reduced
+  to authentication-adjacent extraction rather than gating — for example a
+  single shared middleware fronting routes that require *either* a role or a
+  permission, never unconditionally both, where a blanket non-empty check on
+  either block would incorrectly reject legitimate callers that only carry
+  one of the two (e.g. a machine-to-machine client authorized purely via
+  `permissions`, with no roles at all).
 - `roles.headerName` — header the roles are written to. Format:
   `client:role,client:role2,client2:role3` — clients and roles sorted
   alphabetically. Role and client names must not contain `,` or `:`.
-- `roles.some` — if non-empty, at least one of these `client:role` pairs
-  must be present, or the request is rejected (403).
-- `roles.every` — if non-empty, all of these `client:role` pairs must be
-  present, or the request is rejected (403).
+- `roles.some` — if non-empty, and `roles.enforce` is `true`, at least one
+  of these `client:role` pairs must be present, or the request is rejected
+  (403). Ignored when `roles.enforce` is `false`.
+- `roles.every` — if non-empty, and `roles.enforce` is `true`, all of these
+  `client:role` pairs must be present, or the request is rejected (403).
+  Ignored when `roles.enforce` is `false`.
 - `permissions.enabled` — when true, exchanges the request token with
   Keycloak's token endpoint (`urn:ietf:params:oauth:grant-type:uma-ticket`)
   for a permissions-bearing token, scoped to `permissions.audience`. Rejects
-  the request (403) if the resulting permissions list is empty.
+  the request (403) if the resulting permissions list is empty, unless
+  `permissions.enforce` is `false` (see below).
+- `permissions.enforce` — default `true`. Same semantics as `roles.enforce`,
+  applied to the permissions block: when `false`, permissions are still
+  fetched from Keycloak and forwarded via `permissions.headerName`, but an
+  empty permissions list and unmatched `some`/`every` no longer reject the
+  request.
 - `permissions.headerName` — header the permissions are written to. Format:
   `resource:scope,resource2:scope2`.
 - `permissions.audience` — the Keycloak client id (resource server) to
   request permissions for. Required when `permissions.enabled` is true.
-- `permissions.some` — if non-empty, at least one of these `resource:scope`
-  pairs must be present, or the request is rejected (403).
-- `permissions.every` — if non-empty, all of these `resource:scope` pairs
-  must be present, or the request is rejected (403).
+- `permissions.some` — if non-empty, and `permissions.enforce` is `true`,
+  at least one of these `resource:scope` pairs must be present, or the
+  request is rejected (403). Ignored when `permissions.enforce` is `false`.
+- `permissions.every` — if non-empty, and `permissions.enforce` is `true`,
+  all of these `resource:scope` pairs must be present, or the request is
+  rejected (403). Ignored when `permissions.enforce` is `false`.
 - `headerMap` — maps arbitrary token claims to request headers
   (`<header-name>: <claim-name>`). Applied against the original request
   token, or against the Keycloak-issued token when `permissions.enabled` is

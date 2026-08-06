@@ -705,6 +705,140 @@ func TestAuthorizerHeaderMapMapsClaims(t *testing.T) {
 	assert.False(t, missingHeaderPresent)
 }
 
+func TestCreateConfigDefaultsEnforceToTrue(t *testing.T) {
+	cfg := authorizer.CreateConfig()
+
+	assert.True(t, cfg.Roles.Enforce)
+	assert.True(t, cfg.Permissions.Enforce)
+}
+
+func TestAuthorizerRolesEnforceFalseAllowsNoRoles(t *testing.T) {
+	cfg := authorizer.CreateConfig()
+	cfg.Issuer = "https://keycloak.invalid.example" // unreachable on purpose — must not be called
+	cfg.Roles.Enabled = true
+	cfg.Roles.Enforce = false
+
+	ctx := context.Background()
+	reached := false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { reached = true })
+
+	handler, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A token with no resource_access claim at all -> zero roles extracted, but not enforced.
+	req.Header.Set("Authorization", "Bearer "+makeJWT(map[string]any{"sub": "1234567890"}))
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, 200, recorder.Result().StatusCode)
+	assert.True(t, reached)
+}
+
+func TestAuthorizerRolesEnforceFalseSkipsSomeAndEvery(t *testing.T) {
+	cfg := authorizer.CreateConfig()
+	cfg.Issuer = "https://keycloak.invalid.example" // unreachable on purpose — must not be called
+	cfg.Roles.Enabled = true
+	cfg.Roles.Enforce = false
+	cfg.Roles.Some = []string{"client-a:owner"}                     // not present in validJWT's roles; would reject if enforced
+	cfg.Roles.Every = []string{"client-a:editor", "client-a:owner"} // client-a:owner missing; would reject if enforced
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+validJWT)
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, 200, recorder.Result().StatusCode)
+}
+
+func TestAuthorizerPermissionsEnforceFalseSkipsSomeAndEvery(t *testing.T) {
+	server := newPermissionsServer(t, []map[string]any{
+		{"rsname": "orders", "scopes": []string{"read"}},
+	})
+	defer server.Close()
+
+	cfg := authorizer.CreateConfig()
+	cfg.Issuer = server.URL
+	cfg.Permissions.Enabled = true
+	cfg.Permissions.Enforce = false
+	cfg.Permissions.Audience = "myclient"
+	cfg.Permissions.Some = []string{"billing:write"}                 // not present; would reject if enforced
+	cfg.Permissions.Every = []string{"orders:read", "billing:write"} // billing:write missing; would reject if enforced
+
+	ctx := context.Background()
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {})
+
+	handler, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+validJWT)
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, 200, recorder.Result().StatusCode)
+}
+
+func TestAuthorizerPermissionsEnforceFalseAllowsEmpty(t *testing.T) {
+	server := newPermissionsServer(t, nil)
+	defer server.Close()
+
+	cfg := authorizer.CreateConfig()
+	cfg.Issuer = server.URL
+	cfg.Permissions.Enabled = true
+	cfg.Permissions.Enforce = false
+	cfg.Permissions.Audience = "myclient"
+
+	ctx := context.Background()
+	reached := false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { reached = true })
+
+	handler, err := authorizer.New(ctx, next, cfg, "keycloak-authorizer-plugin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+validJWT)
+
+	handler.ServeHTTP(recorder, req)
+
+	assert.Equal(t, 200, recorder.Result().StatusCode)
+	assert.True(t, reached)
+}
+
 func TestAuthorizerRolesEveryWithDuplicatesDoesNotReject(t *testing.T) {
 	cfg := authorizer.CreateConfig()
 	cfg.Issuer = "https://keycloak.invalid.example" // unreachable on purpose — must not be called
