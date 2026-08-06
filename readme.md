@@ -109,7 +109,8 @@ spec:
   `resource_access` claim directly (no network call to Keycloak). Roles from
   `realm_access` are not included. All clients present in `resource_access`
   are included — there's no audience filter for roles. Rejects the request
-  (403) if no roles are found at all.
+  (403) if no roles are found at all, unless `roles.enforce` is `false`
+  (see below).
 - `roles.enforce` — default `true`. When `false`, roles are still extracted
   and forwarded via `roles.headerName`, but never gate the request: an empty
   role list and unmatched `some`/`every` are both allowed through. Use this
@@ -134,7 +135,8 @@ spec:
 - `permissions.enabled` — when true, exchanges the request token with
   Keycloak's token endpoint (`urn:ietf:params:oauth:grant-type:uma-ticket`)
   for a permissions-bearing token, scoped to `permissions.audience`. Rejects
-  the request (403) if the resulting permissions list is empty.
+  the request (403) if the resulting permissions list is empty, unless
+  `permissions.enforce` is `false` (see below).
 - `permissions.enforce` — default `true`. Same semantics as `roles.enforce`,
   applied to the permissions block: when `false`, permissions are still
   fetched from Keycloak and forwarded via `permissions.headerName`, but an
