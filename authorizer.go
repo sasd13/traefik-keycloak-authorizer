@@ -28,6 +28,7 @@ const (
 // RolesConfig configures roles extraction and gating.
 type RolesConfig struct {
 	Enabled    bool     `json:"enabled,omitempty"`
+	Enforce    bool     `json:"enforce,omitempty"`
 	HeaderName string   `json:"headerName,omitempty"`
 	Some       []string `json:"some,omitempty"`
 	Every      []string `json:"every,omitempty"`
@@ -36,6 +37,7 @@ type RolesConfig struct {
 // PermissionsConfig configures permissions extraction and gating.
 type PermissionsConfig struct {
 	Enabled    bool     `json:"enabled,omitempty"`
+	Enforce    bool     `json:"enforce,omitempty"`
 	HeaderName string   `json:"headerName,omitempty"`
 	Audience   string   `json:"audience,omitempty"`
 	Some       []string `json:"some,omitempty"`
@@ -53,8 +55,8 @@ type Config struct {
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
-		Roles:       RolesConfig{Enabled: false},
-		Permissions: PermissionsConfig{Enabled: false},
+		Roles:       RolesConfig{Enabled: false, Enforce: true},
+		Permissions: PermissionsConfig{Enabled: false, Enforce: true},
 	}
 }
 
@@ -136,7 +138,7 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 		claims = rpt
 		permissions = kc.ReadPermissions(claims)
 
-		if err := p.checkPermissions(permissions); err != nil {
+		if err := p.checkPermissions(permissions); p.permissions.Enforce && err != nil {
 			log.Printf("Permission check failed: %v", err)
 			http.Error(rw, errForbidden, http.StatusForbidden)
 			return
@@ -147,7 +149,7 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 	if p.roles.Enabled {
 		roles = kc.ReadRoles(reqClaims)
 
-		if err := p.checkRoles(roles); err != nil {
+		if err := p.checkRoles(roles); p.roles.Enforce && err != nil {
 			log.Printf("Role check failed: %v", err)
 			http.Error(rw, errForbidden, http.StatusForbidden)
 			return
