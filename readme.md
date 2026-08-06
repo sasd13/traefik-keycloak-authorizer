@@ -38,7 +38,7 @@ experimental:
   plugins:
     jwtAuthorization:
       moduleName: github.com/sasd13/traefik-keycloak-authorizer
-      version: v1.0.0
+      version: v1.1.0
 ```
 
 Once loaded, the plugin is configured per-middleware in the dynamic
