@@ -138,9 +138,7 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 		claims = rpt
 		permissions = kc.ReadPermissions(claims)
 
-		if err := p.checkPermissions(permissions); p.permissions.Enforce && err != nil {
-			log.Printf("Permission check failed: %v", err)
-			http.Error(rw, errForbidden, http.StatusForbidden)
+		if p.logAndReject(rw, "Permission", p.permissions.Enforce, p.checkPermissions(permissions)) {
 			return
 		}
 	}
@@ -149,9 +147,7 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 	if p.roles.Enabled {
 		roles = kc.ReadRoles(reqClaims)
 
-		if err := p.checkRoles(roles); p.roles.Enforce && err != nil {
-			log.Printf("Role check failed: %v", err)
-			http.Error(rw, errForbidden, http.StatusForbidden)
+		if p.logAndReject(rw, "Role", p.roles.Enforce, p.checkRoles(roles)) {
 			return
 		}
 	}
@@ -159,6 +155,24 @@ func (p *KeycloakAuthorizer) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 	p.setMetadata(r, claims, roles, permissions)
 
 	p.next.ServeHTTP(rw, r)
+}
+
+// logAndReject logs a failed check regardless of enforce, so extraction-only mode
+// still leaves a trace of what would have been rejected. It writes a 403 response and
+// reports true (the caller should return) only when enforce is also true.
+func (p *KeycloakAuthorizer) logAndReject(rw http.ResponseWriter, label string, enforce bool, err error) bool {
+	if err == nil {
+		return false
+	}
+
+	log.Printf("%s check failed: %v", label, err)
+
+	if !enforce {
+		return false
+	}
+
+	http.Error(rw, errForbidden, http.StatusForbidden)
+	return true
 }
 
 func (p *KeycloakAuthorizer) checkPermissions(permissions []string) error {
